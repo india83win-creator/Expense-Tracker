@@ -65,6 +65,10 @@ export default function Sidebar() {
             <LogOut size={16} strokeWidth={2} />
             Sign out
           </button>
+          <div className="mt-2 text-[10px] text-ink-faint text-center tracking-wider uppercase border-t border-white/5 pt-4">
+            A product made by<br/>
+            <span className="font-semibold text-emerald-glow tracking-widest mt-1 inline-block">Dhananjay</span>
+          </div>
         </div>
       </div>
     </aside>
