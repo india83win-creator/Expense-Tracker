@@ -59,7 +59,7 @@ app.use('/api/summary', summaryRouter);
 // Fallback error handler
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: 'Something went wrong on the server.' });
+  res.status(500).json({ error: err.message || 'Something went wrong on the server.', stack: err.stack });
 });
 
 const { initDb } = require('./db');
