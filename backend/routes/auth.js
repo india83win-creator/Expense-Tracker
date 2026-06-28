@@ -25,26 +25,29 @@ router.post('/signup', async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
   }
 
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
-  if (existing) {
+  const existingResult = await db.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+  if (existingResult.rows.length > 0) {
     return res.status(409).json({ error: 'An account with this email already exists.' });
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  const result = db
-    .prepare('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)')
-    .run(name.trim(), email.toLowerCase(), passwordHash);
+  const insertResult = await db.query(
+    'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id',
+    [name.trim(), email.toLowerCase(), passwordHash]
+  );
+  
+  const newUserId = insertResult.rows[0].id;
 
-  db.seedDefaultCategoriesForUser(result.lastInsertRowid);
+  await db.seedDefaultCategoriesForUser(newUserId);
 
-  const token = jwt.sign({ userId: result.lastInsertRowid }, JWT_SECRET, {
+  const token = jwt.sign({ userId: newUserId }, JWT_SECRET, {
     expiresIn: TOKEN_EXPIRY,
   });
 
   res.status(201).json({
     token,
-    user: { id: result.lastInsertRowid, name: name.trim(), email: email.toLowerCase() },
+    user: { id: newUserId, name: name.trim(), email: email.toLowerCase() },
   });
 });
 
@@ -56,10 +59,12 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Enter a valid email and password.' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase());
-  if (!user) {
+  const userResult = await db.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+  if (userResult.rows.length === 0) {
     return res.status(401).json({ error: 'Incorrect email or password.' });
   }
+  
+  const user = userResult.rows[0];
 
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) {
@@ -72,19 +77,19 @@ router.post('/login', async (req, res) => {
 });
 
 // GET /api/auth/me — used to restore the session on app load
-router.get('/me', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(req.userId);
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-  res.json({ user });
+router.get('/me', requireAuth, async (req, res) => {
+  const userResult = await db.query('SELECT id, name, email FROM users WHERE id = $1', [req.userId]);
+  if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found.' });
+  res.json({ user: userResult.rows[0] });
 });
 
 // PUT /api/auth/budget - update monthly budget
-router.put('/budget', requireAuth, (req, res) => {
+router.put('/budget', requireAuth, async (req, res) => {
   const { amount } = req.body;
   if (typeof amount !== 'number' || amount <= 0) {
     return res.status(400).json({ error: 'Invalid budget amount.' });
   }
-  db.prepare('UPDATE users SET monthly_budget = ? WHERE id = ?').run(amount, req.userId);
+  await db.query('UPDATE users SET monthly_budget = $1 WHERE id = $2', [amount, req.userId]);
   res.json({ message: 'Budget updated successfully.', monthly_budget: amount });
 });
 

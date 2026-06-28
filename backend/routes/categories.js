@@ -6,35 +6,37 @@ const { requireAuth } = require('../middleware/auth');
 router.use(requireAuth);
 
 // GET all categories for the signed-in user (with expense counts)
-router.get('/', (req, res) => {
-  const categories = db
-    .prepare(
-      `SELECT c.*, COUNT(e.id) as expense_count, COALESCE(SUM(e.amount), 0) as total_spent
+router.get('/', async (req, res) => {
+  try {
+    const categoriesResult = await db.query(
+      `SELECT c.*, COUNT(e.id)::int as expense_count, COALESCE(SUM(e.amount), 0)::float as total_spent
        FROM categories c
        LEFT JOIN expenses e ON e.category_id = c.id AND e.user_id = c.user_id
-       WHERE c.user_id = ?
+       WHERE c.user_id = $1
        GROUP BY c.id
-       ORDER BY c.is_default DESC, c.name ASC`
-    )
-    .all(req.userId);
-  res.json(categories);
+       ORDER BY c.is_default DESC, c.name ASC`,
+      [req.userId]
+    );
+    res.json(categoriesResult.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch categories.' });
+  }
 });
 
 // POST create category
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { name, color, icon } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Category name is required.' });
   }
   try {
-    const stmt = db.prepare(
-      'INSERT INTO categories (user_id, name, color, icon, is_default) VALUES (?, ?, ?, ?, 0)'
+    const insertResult = await db.query(
+      'INSERT INTO categories (user_id, name, color, icon, is_default) VALUES ($1, $2, $3, $4, 0) RETURNING *',
+      [req.userId, name.trim(), color || '#34D399', icon || '✨']
     );
-    const result = stmt.run(req.userId, name.trim(), color || '#34D399', icon || '\u2728');
-    const created = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json(created);
+    res.status(201).json(insertResult.rows[0]);
   } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    if (err.code === '23505') { // Postgres unique violation
       return res.status(409).json({ error: 'A category with this name already exists.' });
     }
     res.status(500).json({ error: 'Could not create category.' });
@@ -42,41 +44,47 @@ router.post('/', (req, res) => {
 });
 
 // PUT update category
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { name, color, icon } = req.body;
-  const existing = db.prepare('SELECT * FROM categories WHERE id = ? AND user_id = ?').get(id, req.userId);
-  if (!existing) return res.status(404).json({ error: 'Category not found.' });
-
+  
   try {
-    db.prepare('UPDATE categories SET name = ?, color = ?, icon = ? WHERE id = ?').run(
-      name?.trim() || existing.name,
-      color || existing.color,
-      icon || existing.icon,
-      id
+    const existingResult = await db.query('SELECT * FROM categories WHERE id = $1 AND user_id = $2', [id, req.userId]);
+    if (existingResult.rows.length === 0) return res.status(404).json({ error: 'Category not found.' });
+    const existing = existingResult.rows[0];
+
+    const updatedResult = await db.query(
+      'UPDATE categories SET name = $1, color = $2, icon = $3 WHERE id = $4 RETURNING *',
+      [name?.trim() || existing.name, color || existing.color, icon || existing.icon, id]
     );
-    const updated = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
-    res.json(updated);
+    res.json(updatedResult.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Could not update category.' });
   }
 });
 
 // DELETE category
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  const existing = db.prepare('SELECT * FROM categories WHERE id = ? AND user_id = ?').get(id, req.userId);
-  if (!existing) return res.status(404).json({ error: 'Category not found.' });
+  
+  try {
+    const existingResult = await db.query('SELECT * FROM categories WHERE id = $1 AND user_id = $2', [id, req.userId]);
+    if (existingResult.rows.length === 0) return res.status(404).json({ error: 'Category not found.' });
 
-  const inUse = db.prepare('SELECT COUNT(*) as c FROM expenses WHERE category_id = ?').get(id).c;
-  if (inUse > 0) {
-    return res.status(409).json({
-      error: `This category is used by ${inUse} expense${inUse > 1 ? 's' : ''}. Reassign or delete those first.`,
-    });
+    const inUseResult = await db.query('SELECT COUNT(*)::int as c FROM expenses WHERE category_id = $1', [id]);
+    const inUse = inUseResult.rows[0].c;
+    
+    if (inUse > 0) {
+      return res.status(409).json({
+        error: `This category is used by ${inUse} expense${inUse > 1 ? 's' : ''}. Reassign or delete those first.`,
+      });
+    }
+
+    await db.query('DELETE FROM categories WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: 'Could not delete category.' });
   }
-
-  db.prepare('DELETE FROM categories WHERE id = ?').run(id);
-  res.status(204).send();
 });
 
 module.exports = router;

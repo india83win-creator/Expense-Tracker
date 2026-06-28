@@ -6,55 +6,74 @@ const { requireAuth } = require('../middleware/auth');
 router.use(requireAuth);
 
 // GET expenses with optional filters: startDate, endDate, categoryId, search
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { startDate, endDate, categoryId, search } = req.query;
 
   let query = `
     SELECT e.*, c.name as category_name, c.color as category_color, c.icon as category_icon
     FROM expenses e
     LEFT JOIN categories c ON c.id = e.category_id
-    WHERE e.user_id = ?
+    WHERE e.user_id = $1
   `;
   const params = [req.userId];
+  let paramCount = 1;
 
   if (startDate) {
-    query += ' AND e.date >= ?';
+    paramCount++;
+    query += ` AND e.date >= $${paramCount}`;
     params.push(startDate);
   }
   if (endDate) {
-    query += ' AND e.date <= ?';
+    paramCount++;
+    query += ` AND e.date <= $${paramCount}`;
     params.push(endDate);
   }
   if (categoryId) {
-    query += ' AND e.category_id = ?';
+    paramCount++;
+    query += ` AND e.category_id = $${paramCount}`;
     params.push(categoryId);
   }
   if (search) {
-    query += ' AND e.description LIKE ?';
+    paramCount++;
+    query += ` AND e.description ILIKE $${paramCount}`; // ILIKE for case-insensitive Postgres search
     params.push(`%${search}%`);
   }
 
   query += ' ORDER BY e.date DESC, e.id DESC';
 
-  const expenses = db.prepare(query).all(...params);
-  res.json(expenses);
+  try {
+    const expensesResult = await db.query(query, params);
+    // Format date objects to strings for the frontend
+    const expenses = expensesResult.rows.map(e => ({
+      ...e,
+      date: typeof e.date === 'string' ? e.date : e.date.toISOString().split('T')[0]
+    }));
+    res.json(expenses);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch expenses.' });
+  }
 });
 
 // GET single expense
-router.get('/:id', (req, res) => {
-  const expense = db
-    .prepare(
+router.get('/:id', async (req, res) => {
+  try {
+    const expenseResult = await db.query(
       `SELECT e.*, c.name as category_name, c.color as category_color, c.icon as category_icon
        FROM expenses e LEFT JOIN categories c ON c.id = e.category_id
-       WHERE e.id = ? AND e.user_id = ?`
-    )
-    .get(req.params.id, req.userId);
-  if (!expense) return res.status(404).json({ error: 'Expense not found.' });
-  res.json(expense);
+       WHERE e.id = $1 AND e.user_id = $2`,
+      [req.params.id, req.userId]
+    );
+    if (expenseResult.rows.length === 0) return res.status(404).json({ error: 'Expense not found.' });
+    const expense = expenseResult.rows[0];
+    expense.date = typeof expense.date === 'string' ? expense.date : expense.date.toISOString().split('T')[0];
+    res.json(expense);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch expense.' });
+  }
 });
 
 // POST create expense
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { amount, description, categoryId, date } = req.body;
 
   if (amount === undefined || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
@@ -67,71 +86,87 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'A date is required.' });
   }
 
-  // Make sure the category actually belongs to this user
-  const category = db.prepare('SELECT id FROM categories WHERE id = ? AND user_id = ?').get(categoryId, req.userId);
-  if (!category) {
-    return res.status(400).json({ error: 'Invalid category.' });
-  }
+  try {
+    const categoryResult = await db.query('SELECT id FROM categories WHERE id = $1 AND user_id = $2', [categoryId, req.userId]);
+    if (categoryResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid category.' });
+    }
 
-  const stmt = db.prepare(
-    'INSERT INTO expenses (user_id, amount, description, category_id, date) VALUES (?, ?, ?, ?, ?)'
-  );
-  const result = stmt.run(req.userId, parseFloat(amount), description?.trim() || '', categoryId, date);
+    const insertResult = await db.query(
+      'INSERT INTO expenses (user_id, amount, description, category_id, date) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [req.userId, parseFloat(amount), description?.trim() || '', categoryId, date]
+    );
 
-  const created = db
-    .prepare(
+    const createdResult = await db.query(
       `SELECT e.*, c.name as category_name, c.color as category_color, c.icon as category_icon
-       FROM expenses e LEFT JOIN categories c ON c.id = e.category_id WHERE e.id = ?`
-    )
-    .get(result.lastInsertRowid);
-
-  res.status(201).json(created);
+       FROM expenses e LEFT JOIN categories c ON c.id = e.category_id WHERE e.id = $1`,
+      [insertResult.rows[0].id]
+    );
+    
+    const created = createdResult.rows[0];
+    created.date = typeof created.date === 'string' ? created.date : created.date.toISOString().split('T')[0];
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: 'Could not create expense.' });
+  }
 });
 
 // PUT update expense
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const existing = db.prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?').get(id, req.userId);
-  if (!existing) return res.status(404).json({ error: 'Expense not found.' });
+  
+  try {
+    const existingResult = await db.query('SELECT * FROM expenses WHERE id = $1 AND user_id = $2', [id, req.userId]);
+    if (existingResult.rows.length === 0) return res.status(404).json({ error: 'Expense not found.' });
+    const existing = existingResult.rows[0];
 
-  const { amount, description, categoryId, date } = req.body;
+    const { amount, description, categoryId, date } = req.body;
 
-  if (amount !== undefined && (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)) {
-    return res.status(400).json({ error: 'Amount must be a valid positive number.' });
-  }
+    if (amount !== undefined && (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)) {
+      return res.status(400).json({ error: 'Amount must be a valid positive number.' });
+    }
 
-  if (categoryId) {
-    const category = db.prepare('SELECT id FROM categories WHERE id = ? AND user_id = ?').get(categoryId, req.userId);
-    if (!category) return res.status(400).json({ error: 'Invalid category.' });
-  }
+    if (categoryId) {
+      const categoryResult = await db.query('SELECT id FROM categories WHERE id = $1 AND user_id = $2', [categoryId, req.userId]);
+      if (categoryResult.rows.length === 0) return res.status(400).json({ error: 'Invalid category.' });
+    }
 
-  db.prepare(
-    'UPDATE expenses SET amount = ?, description = ?, category_id = ?, date = ? WHERE id = ?'
-  ).run(
-    amount !== undefined ? parseFloat(amount) : existing.amount,
-    description !== undefined ? description.trim() : existing.description,
-    categoryId || existing.category_id,
-    date || existing.date,
-    id
-  );
+    await db.query(
+      'UPDATE expenses SET amount = $1, description = $2, category_id = $3, date = $4 WHERE id = $5',
+      [
+        amount !== undefined ? parseFloat(amount) : existing.amount,
+        description !== undefined ? description.trim() : existing.description,
+        categoryId || existing.category_id,
+        date || existing.date,
+        id
+      ]
+    );
 
-  const updated = db
-    .prepare(
+    const updatedResult = await db.query(
       `SELECT e.*, c.name as category_name, c.color as category_color, c.icon as category_icon
-       FROM expenses e LEFT JOIN categories c ON c.id = e.category_id WHERE e.id = ?`
-    )
-    .get(id);
+       FROM expenses e LEFT JOIN categories c ON c.id = e.category_id WHERE e.id = $1`,
+      [id]
+    );
 
-  res.json(updated);
+    const updated = updatedResult.rows[0];
+    updated.date = typeof updated.date === 'string' ? updated.date : updated.date.toISOString().split('T')[0];
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: 'Could not update expense.' });
+  }
 });
 
 // DELETE expense
-router.delete('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
-  if (!existing) return res.status(404).json({ error: 'Expense not found.' });
+router.delete('/:id', async (req, res) => {
+  try {
+    const existingResult = await db.query('SELECT id FROM expenses WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    if (existingResult.rows.length === 0) return res.status(404).json({ error: 'Expense not found.' });
 
-  db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id);
-  res.status(204).send();
+    await db.query('DELETE FROM expenses WHERE id = $1', [req.params.id]);
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: 'Could not delete expense.' });
+  }
 });
 
 module.exports = router;

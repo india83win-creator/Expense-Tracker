@@ -25,6 +25,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong on the server.' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Midnight Ledger API running at http://localhost:${PORT}`);
+const { initDb } = require('./db');
+
+initDb().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Midnight Ledger API running at http://localhost:${PORT}`);
+  });
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });
