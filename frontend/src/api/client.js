@@ -11,6 +11,14 @@ client.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Pass the user's local date to the backend to prevent timezone bugs
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  config.headers['x-local-date'] = `${year}-${month}-${day}`;
+
   return config;
 });
 

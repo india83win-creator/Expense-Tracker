@@ -9,9 +9,23 @@ router.use(requireAuth);
 router.get('/', async (req, res) => {
   try {
     const userId = req.userId;
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const today = now.toISOString().slice(0, 10);
+    const localDateStr = req.headers['x-local-date'];
+    
+    let year, month, dateDay;
+    if (localDateStr) {
+      const parts = localDateStr.split('-');
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10) - 1; // 0-indexed
+      dateDay = parseInt(parts[2], 10);
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth();
+      dateDay = now.getDate();
+    }
+    
+    const monthStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const today = `${year}-${String(month + 1).padStart(2, '0')}-${String(dateDay).padStart(2, '0')}`;
 
     const totalAllResult = await db.query('SELECT COALESCE(SUM(amount), 0)::float as total FROM expenses WHERE user_id = $1', [userId]);
     const totalAll = totalAllResult.rows[0].total;
@@ -44,15 +58,23 @@ router.get('/', async (req, res) => {
     // Last 6 months trend
     const monthlyTrend = [];
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const start = d.toISOString().slice(0, 10);
-      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+      let m = month - i;
+      let y = year;
+      while (m < 0) {
+        m += 12;
+        y -= 1;
+      }
+      
+      const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+      const endD = new Date(y, m + 1, 0); // last day of month `m`
+      const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(endD.getDate()).padStart(2, '0')}`;
       
       const totalResult = await db.query('SELECT COALESCE(SUM(amount), 0)::float as total FROM expenses WHERE user_id = $1 AND date >= $2 AND date <= $3', [userId, start, end]);
       const total = totalResult.rows[0].total;
       
+      const monthName = new Date(y, m, 1).toLocaleString('en-US', { month: 'short' });
       monthlyTrend.push({
-        month: d.toLocaleString('en-US', { month: 'short' }),
+        month: monthName,
         total: Math.round(total * 100) / 100,
       });
     }
