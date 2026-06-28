@@ -10,7 +10,7 @@ const links = [
 export default function MobileNav() {
   return (
     <nav className="md:hidden fixed bottom-4 left-4 right-4 z-40">
-      <div className="glass-strong rounded-xl2 shadow-glass flex justify-around p-2">
+      <div className="bg-[#0A0E1A]/95 backdrop-blur-xl border border-white/10 rounded-xl2 shadow-glass flex justify-around p-2">
         {links.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
