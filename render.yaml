@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: expense-tracker-backend
+    env: node
+    region: oregon
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24.13.0
+      - key: PORT
+        value: 4000
+      - key: DB_PATH
+        value: /opt/render/project/src/backend/data/expenses.db
+      - key: JWT_SECRET
+        generateValue: true
+    disk:
+      name: sqlite-data
+      mountPath: /opt/render/project/src/backend/data
+      sizeGB: 1
