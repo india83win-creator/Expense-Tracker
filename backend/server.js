@@ -11,15 +11,28 @@ const summaryRouter = require('./routes/summary');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Trust the reverse proxy (Render) so rate limiting uses the real client IP
+app.set('trust proxy', 1);
+
 // Security Middleware: Set HTTP headers to protect against common web vulnerabilities
 app.use(helmet());
 
 // Security Middleware: CORS
 // In production, restrict to VITE_API_URL or a specific domain. For now, allow all if not set.
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' && process.env.FRONTEND_URL 
-    ? process.env.FRONTEND_URL 
-    : '*',
+  origin: (origin, callback) => {
+    if (process.env.NODE_ENV === 'production' && process.env.FRONTEND_URL) {
+      // Remove trailing slash for comparison
+      const allowed = process.env.FRONTEND_URL.replace(/\/$/, '');
+      if (origin === allowed) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    } else {
+      callback(null, true); // Allow all
+    }
+  },
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
