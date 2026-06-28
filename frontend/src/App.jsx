@@ -25,6 +25,10 @@ function AppShell() {
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/categories" element={<Categories />} />
             </Routes>
+            <div className="md:hidden mt-8 mb-4 text-[10px] text-ink-faint text-center tracking-wider uppercase">
+              A product made by<br/>
+              <span className="font-semibold text-emerald-glow tracking-widest mt-1 inline-block">Dhananjay Baral</span>
+            </div>
           </div>
         </main>
       </div>
