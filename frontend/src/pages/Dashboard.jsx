@@ -59,22 +59,26 @@ export default function Dashboard() {
       {/* Hero */}
       <GlassCard strong className="p-6 sm:p-8 relative overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-          <div className="flex items-center gap-8">
+          <div className="flex flex-row items-center justify-between w-full sm:w-auto gap-4 sm:gap-8">
             <div>
               <p className="text-xs uppercase tracking-widest text-ink-soft mb-2">
                 Total spent this month
               </p>
-              <p className="font-display text-5xl sm:text-6xl font-medium tracking-tight">
+              <p className="font-display text-4xl sm:text-6xl font-medium tracking-tight">
                 {formatINR(summary.totalThisMonth)}
               </p>
-              <p className="text-sm text-ink-faint mt-2">
+              <p className="text-xs sm:text-sm text-ink-faint mt-2">
                 {summary.expenseCount} expense{summary.expenseCount !== 1 ? 's' : ''} logged in total ·{' '}
                 {formatINR(summary.totalAll)} all-time
               </p>
             </div>
 
-            <div className="hidden sm:block relative w-[100px] h-[100px] shrink-0">
-              <svg width="100" height="100" className="-rotate-90">
+            <div 
+              className="relative w-[72px] h-[72px] sm:w-[100px] sm:h-[100px] shrink-0 cursor-pointer group"
+              onClick={() => setBudgetFormOpen(true)}
+              title="Edit Monthly Budget"
+            >
+              <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                 <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="8" />
                 <circle
                   cx="50"
@@ -89,15 +93,11 @@ export default function Dashboard() {
                   style={{ transition: 'stroke-dashoffset 0.6s ease' }}
                 />
               </svg>
-              <div 
-                className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer group"
-                onClick={() => setBudgetFormOpen(true)}
-                title="Edit Monthly Budget"
-              >
-                <span className="font-mono text-sm font-medium">{pct}%</span>
-                <span className="text-[10px] text-ink-faint group-hover:text-emerald-400 transition-colors flex items-center gap-1">
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-mono text-[11px] sm:text-sm font-medium">{pct}%</span>
+                <span className="text-[9px] sm:text-[10px] text-ink-faint group-hover:text-emerald-400 transition-colors flex items-center gap-1">
                   of ₹{budgetMonthlyTarget >= 1000 ? `${budgetMonthlyTarget / 1000}k` : budgetMonthlyTarget}
-                  <Pencil size={10} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Pencil size={10} className="hidden sm:block opacity-0 group-hover:opacity-100 transition-opacity" />
                 </span>
               </div>
             </div>
